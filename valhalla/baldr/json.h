@@ -83,7 +83,8 @@ public:
   std::ostream& operator()(const std::string& value) const {
     ostream_ << '"';
     // TODO: this may need to get more complicated
-    for (const auto& c : value) {
+    for (const auto& auto_char : value) {
+      signed char c = reinterpret_cast<const signed char&>(auto_char);
       switch (c) {
         case '\\':
           ostream_ << "\\\\";

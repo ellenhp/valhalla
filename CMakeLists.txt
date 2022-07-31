@@ -36,6 +36,9 @@ option(ENABLE_THREAD_SAFE_TILE_REF_COUNT "If ON uses shared_ptr as tile referenc
 option(ENABLE_SINGLE_FILES_WERROR "Convert compiler warnings to errors for single files" ON)
 # useful to workaround issues likes this https://stackoverflow.com/questions/24078873/cmake-generated-xcode-project-wont-compile
 option(ENABLE_STATIC_LIBRARY_MODULES "If ON builds Valhalla modules as STATIC library targets" OFF)
+option(ENABLE_PRIME_SERVER_VERSION_CHECK "Check the version of the prime_server package" ON)
+set(PRIME_SERVER_LIB "" CACHE STRING "The prime_server library.")
+set(PRIME_SERVER_INCLUDE_DIR "" CACHE STRING "The prime_server include directory.")
 
 set(LOGGING_LEVEL "" CACHE STRING "Logging level, default is INFO")
 set_property(CACHE LOGGING_LEVEL PROPERTY STRINGS "NONE;ALL;ERROR;WARN;INFO;DEBUG;TRACE")
@@ -230,15 +233,30 @@ endif()
 
 add_library(libprime_server INTERFACE IMPORTED)
 if(ENABLE_SERVICES)
-  pkg_check_modules(libprime_server REQUIRED libprime_server>=0.6.3)
-  # workaround for https://gitlab.kitware.com/cmake/cmake/issues/15804
-  find_library(libprime_server_LIBRARY
-    NAME ${libprime_server_LIBRARIES}
-    HINTS ${libprime_server_LIBRARY_DIRS})
-  set_target_properties(libprime_server PROPERTIES
-    INTERFACE_LINK_LIBRARIES "${libprime_server_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${libprime_server_INCLUDE_DIRS}"
-    INTERFACE_COMPILE_DEFINITIONS HAVE_HTTP)
+  if (ENABLE_PRIME_SERVER_VERSION_CHECK)
+    pkg_check_modules(libprime_server REQUIRED libprime_server>=0.6.3)
+    # workaround for https://gitlab.kitware.com/cmake/cmake/issues/15804
+    find_library(libprime_server_LIBRARY
+      NAME "${libprime_server_LIBRARIES}"
+      HINTS ${libprime_server_LIBRARY_DIRS} ${PRIME_SERVER_LIB_DIR})
+    set_target_properties(libprime_server PROPERTIES
+      INTERFACE_LINK_LIBRARIES "${libprime_server_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${libprime_server_INCLUDE_DIRS}"
+      INTERFACE_COMPILE_DEFINITIONS HAVE_HTTP)
+  else()
+    find_library(libzmq_LIBRARY
+      NAME zmq.so libzmq.so
+      PATHS "/lib" "/usr/lib")
+    find_library(libczmq_LIBRARY
+      NAME czmq.so libczmq.so
+      PATHS "/lib" "/usr/lib")
+    target_link_libraries(libprime_server INTERFACE ${PRIME_SERVER_LIB})
+    target_link_libraries(libprime_server INTERFACE ${libzmq_LIBRARY})
+    target_link_libraries(libprime_server INTERFACE ${libczmq_LIBRARY})
+    target_include_directories(libprime_server INTERFACE ${PRIME_SERVER_INCLUDE_DIR})
+    target_compile_definitions(libprime_server INTERFACE HAVE_HTTP)
+endif()
+  
 endif()
 
 ## Mjolnir and associated executables
@@ -308,7 +326,7 @@ if(ENABLE_TOOLS)
     add_executable(${program} ${path})
     set_target_properties(${program} PROPERTIES FOLDER "Tools")
     create_source_groups("Source Files" ${path})
-    target_link_libraries(${program} valhalla)
+    target_link_libraries(${program} valhalla "zmq")
     target_include_directories(${program} PUBLIC ${VALHALLA_SOURCE_DIR}/third_party/cxxopts/include)
     if(MSVC)
       target_link_libraries(${program} ${CURL_LIBRARIES})
@@ -324,7 +342,7 @@ if(ENABLE_DATA_TOOLS)
     create_source_groups("Source Files" ${path})
     set_target_properties(${program} PROPERTIES FOLDER "Data Tools")
     target_include_directories(${program} PUBLIC ${VALHALLA_SOURCE_DIR}/third_party/cxxopts/include)
-    target_link_libraries(${program} valhalla)
+    target_link_libraries(${program} valhalla "zmq")
     if (LUAJIT_FOUND AND APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
       # Using LuaJIT on macOS on Intel processors requires a couple of extra linker flags
       target_link_options(${program} PUBLIC -pagezero_size 10000 -image_base 100000000)
@@ -349,7 +367,7 @@ if(ENABLE_SERVICES)
     add_executable(${program} src/${program}.cc)
     create_source_groups("Source Files" src/${program}.cc)
     set_target_properties(${program} PROPERTIES FOLDER "Services")
-    target_link_libraries(${program} valhalla)
+    target_link_libraries(${program} valhalla "zmq")
     target_include_directories(${program} PUBLIC ${VALHALLA_SOURCE_DIR}/third_party/cxxopts/include)
     install(TARGETS ${program} DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime)
   endforeach()
